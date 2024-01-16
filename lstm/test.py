@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
     model = build_model(args.model, args.out_size)
     log_dir = "./logs/{}/{}".format('/data/ETTh1.csv', args.model)
-    checkpoint = torch.load(os.path.join(log_dir, "checkpoint_best_336_460:0.03243079261847058.pth"), map_location="cpu")
+    checkpoint = torch.load(os.path.join(log_dir, "checkpoint_best_336.pth"), map_location="cpu")
     model.load_state_dict(checkpoint["model"])
     model.to(args.device)
 
