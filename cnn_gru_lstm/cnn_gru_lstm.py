@@ -9,56 +9,45 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
  
-# 将matplotlib的日志级别设置为警告级别
-mpl_logger = logging.getLogger('matplotlib')
-mpl_logger.setLevel(logging.WARNING)
-logging.basicConfig(level=logging.DEBUG)
- 
  
 # 参数设置部分
-parser = argparse.ArgumentParser(description="CNN-GRU-LSTM for multivariate time series forecasting",
-                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--data-dir', type=str, default='./', help='relative path to input data')
-parser.add_argument('--data_name', type=str, default='ETTh1.csv', help='Input Model File Name')
-parser.add_argument('--max-records', type=int, default=None, help='total records before data split')
-parser.add_argument('--q', type=int, default=96,
-                    help='number of histrical measurements included in each training example')
-parser.add_argument('--horizon', type=int, default=96, choices=[96,336],help='number of measurements ahead to predict')
-parser.add_argument('--splits', type=str, default="0.6,0.2",
-                    help='fraction of data to use for train & validation. remainder used for test.')
-parser.add_argument('--batch-size', type=int, default=2048, help='the batch size.')
-parser.add_argument('--filter-list', type=str, default="6,12,18", help='unique filter sizes')
-parser.add_argument('--num-filters', type=int, default=100, help='number of each filter size')
-parser.add_argument('--recurrent-state-size', type=int, default=100,
-                    help='number of hidden units in each unrolled recurrent cell')
-parser.add_argument('--seasonal-period', type=int, default=24, help='time between seasonal measurements')
-parser.add_argument('--time-interval', type=int, default=1, help='time between each measurement')
-parser.add_argument('--gpus', type=str, default='0',
-                    help='list of gpus to run, e.g. 0 or 0,2,5. empty means using cpu. ')   #  gpu 修改
-parser.add_argument('--optimizer', type=str, default='adam', help='the optimizer type')
-parser.add_argument('--lr', type=float, default=0.001, help='initial learning rate')
-parser.add_argument('--dropout', type=float, default=0.2, help='dropout rate for network')
-parser.add_argument('--num-epochs', type=int, default=1000, help='max num of epochs')
-parser.add_argument('--save-period', type=int, default=20, help='save checkpoint for every n epochs')
-parser.add_argument('--model_prefix', type=str, default='electricity_model', help='prefix for saving model params')
+config = argparse.ArgumentParser(description="CNN-GRU-LSTM",formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+config.add_argument('--data-dir', type=str, default='./')
+config.add_argument('--data_name', type=str, default='ETTh1.csv')
+config.add_argument('--max-records', type=int, default=None)
+config.add_argument('--q', type=int, default=96,
+                    help='根据前96个进行预测')
+config.add_argument('--horizon', type=int, default=96, choices=[96,336],help='预测的长度')
+# parser.add_argument('--splits', type=str, default="0.6,0.2",
+#                     help='划分数据集')
+config.add_argument('--batch-size', type=int, default=2048, help='batch size.')
+config.add_argument('--filter-list', type=str, default="6,12,18")
+config.add_argument('--num-filters', type=int, default=100)
+config.add_argument('--recurrent-state-size', type=int, default=100)
+config.add_argument('--seasonal-period', type=int, default=24)
+config.add_argument('--time-interval', type=int, default=1)
+config.add_argument('--gpus', type=str, default='0')   #  gpu 修改
+config.add_argument('--optimizer', type=str, default='adam')
+config.add_argument('--lr', type=float, default=0.001)
+config.add_argument('--dropout', type=float, default=0.2)
+config.add_argument('--num-epochs', type=int, default=1000)
+config.add_argument('--save-period', type=int, default=20)
+config.add_argument('--model_prefix', type=str, default='electricity_model')
 
  
 def rse(label, pred):
-    """computes the root relative squared error (condensed using standard deviation formula)"""
     numerator = np.sqrt(np.mean(np.square(label - pred), axis=None))
     denominator = np.std(label, axis=None)
     return numerator / denominator
  
  
 def rae(label, pred):
-    """computes the relative absolute error (condensed using standard deviation formula)"""
     numerator = np.mean(np.abs(label - pred), axis=None)
     denominator = np.mean(np.abs(label - np.mean(label, axis=None)), axis=None)
     return numerator / denominator
  
  
 def corr(label, pred):
-    """computes the empirical correlation coefficient"""
     numerator1 = label - np.mean(label, axis=0)
     numerator2 = pred - np.mean(pred, axis=0)
     numerator = np.mean(numerator1 * numerator2, axis=0)
@@ -67,9 +56,6 @@ def corr(label, pred):
  
  
 def get_custom_metrics():
-    """
-    :return: mxnet metric object
-    """
     _rse = mx.metric.create(rse)
     _rae = mx.metric.create(rae)
     _corr = mx.metric.create(corr)
@@ -80,12 +66,7 @@ def evaluate(pred, label):
     return {"RAE": rae(label, pred), "RSE": rse(label, pred), "CORR": corr(label, pred)}
  
  
-def build_iters(data_dir, max_records, q, horizon, splits, batch_size):
-    """
-    Load & generate training examples from multivariate time series data
-    :return: data iters & variables required to define network architecture
-    """
-    # Read in data as numpy array
+def build_iters(data_dir, max_records, q, horizon, batch_size):
     csv_list = ['train_set.csv','test_set.csv','validation_set.csv']
     out_list = ['train_csv','test_csv','validation_csv']
     for i in range(len(csv_list)):
@@ -94,7 +75,6 @@ def build_iters(data_dir, max_records, q, horizon, splits, batch_size):
         x = feature_df.values
         x = x[:max_records] if max_records else x
     
-        # Construct training examples based on horizon and window
         x_ts = np.zeros((x.shape[0] - q, q, x.shape[1]))
         y_ts = np.zeros((x.shape[0] - q, x.shape[1]))
         for n in range(x.shape[0]):
@@ -113,17 +93,15 @@ def build_iters(data_dir, max_records, q, horizon, splits, batch_size):
             
     return out_list[0],out_list[1],out_list[2]
  
-def sym_gen(train_iter, q, filter_list, num_filter, dropout, rcells, skiprcells, seasonal_period, time_interval):
+def net(train_iter, q, filter_list, num_filter, dropout, rcells, skiprcells, seasonal_period, time_interval):
     input_feature_shape = train_iter.provide_data[0][1]
     X = mx.symbol.Variable(train_iter.provide_data[0].name)
     Y = mx.sym.Variable(train_iter.provide_label[0].name)
  
-    # reshape data before applying convolutional layer (takes 4D shape incase you ever work with images)
+    # 转为卷积输入类型
     conv_input = mx.sym.reshape(data=X, shape=(0, 1, q, -1))
  
-    ###############
-    # CNN Component
-    ###############
+    # CNN
     outputs = []
     for i, filter_size in enumerate(filter_list):
         # pad input array to ensure number output rows = number input rows after applying kernel
@@ -136,9 +114,7 @@ def sym_gen(train_iter, q, filter_list, num_filter, dropout, rcells, skiprcells,
     cnn_features = mx.sym.Concat(*outputs, dim=2)
     cnn_reg_features = mx.sym.Dropout(cnn_features, p=dropout)
  
-    ###############
-    # GRU Component
-    ###############
+    # GRU
     stacked_rnn_cells = mx.rnn.SequentialRNNCell()
     for i, recurrent_cell in enumerate(rcells):
         stacked_rnn_cells.add(recurrent_cell)
@@ -146,25 +122,20 @@ def sym_gen(train_iter, q, filter_list, num_filter, dropout, rcells, skiprcells,
     outputs, states = stacked_rnn_cells.unroll(length=q, inputs=cnn_reg_features, merge_outputs=False)
     rnn_features = outputs[-1]  # only take value from final unrolled cell for use later
  
-    ####################
-    # LSTM Component
-    ####################
+    # LSTM
     stacked_rnn_cells = mx.rnn.SequentialRNNCell()
     for i, recurrent_cell in enumerate(skiprcells):
         stacked_rnn_cells.add(recurrent_cell)
         stacked_rnn_cells.add(mx.rnn.DropoutCell(dropout))
     outputs, states = stacked_rnn_cells.unroll(length=q, inputs=cnn_reg_features, merge_outputs=False)
  
-    # Take output from cells p steps apart
     p = int(seasonal_period / time_interval)
     output_indices = list(range(0, q, p))
     outputs.reverse()
     skip_outputs = [outputs[i] for i in output_indices]
     skip_rnn_features = mx.sym.concat(*skip_outputs, dim=1)
  
-    ##########################
-    # Autoregressive Component
-    ##########################
+
     auto_list = []
     for i in list(range(input_feature_shape[2])):
         time_series = mx.sym.slice_axis(data=X, axis=2, begin=i, end=i + 1)
@@ -172,9 +143,7 @@ def sym_gen(train_iter, q, filter_list, num_filter, dropout, rcells, skiprcells,
         auto_list.append(fc_ts)
     ar_output = mx.sym.concat(*auto_list, dim=1)
  
-    ######################
-    # Prediction Component
-    ######################
+
     neural_components = mx.sym.concat(*[rnn_features, skip_rnn_features], dim=1)
     neural_output = mx.sym.FullyConnected(data=neural_components, num_hidden=input_feature_shape[2])
     model_output = neural_output + ar_output
@@ -264,54 +233,40 @@ def predict(symbol, train_iter, val_iter, test_iter, data_names, label_names):
     # 创建一个新的图形
     plt.figure(figsize=(10, 6))
  
-    # 绘制预测值曲线，使用蓝色实线
     plt.plot(range(96+args.horizon), pre_results, linewidth=2, label='Prediction')
  
-    # 绘制真实值曲线，使用红色虚线
     plt.plot(range(96+args.horizon), real_results, linewidth=2, label='GroundTruth')
  
  
-    # 添加图例
     plt.legend(loc='upper left')
  
-    # 显示网格线
     plt.grid(True, linestyle='--', alpha=0.5)
  
-    # 保存图形
     plt.savefig('predict_cnn_gru_lstm_96_500.png')
- 
-    # 显示图形
     plt.show()
     # print(test_label, test_pred)
  
  
 if __name__ == '__main__':
-    # parse args
-    args = parser.parse_args()
+    args = config.parse_args()
     args.splits = list(map(float, args.splits.split(',')))
     args.filter_list = list(map(int, args.filter_list.split(',')))
  
-    # Check valid args
     if not max(args.filter_list) <= args.q:
         raise AssertionError("no filter can be larger than q")
     if not args.q >= math.ceil(args.seasonal_period / args.time_interval):
         raise AssertionError("size of skip connections cannot exceed q")
-    # Build data iterators
-    train_iter, val_iter, test_iter = build_iters(args.data_dir, args.max_records, args.q, args.horizon, args.splits,
-                                                  args.batch_size)
+    train_iter, val_iter, test_iter = build_iters(args.data_dir, args.max_records, args.q, args.horizon,args.batch_size)
     # train_iter = build_iters(args.data_dir, args.max_records, args.q, args.horizon, args.splits,
     #                                               args.batch_size)
-    # Choose cells for recurrent layers: each cell will take the output of the previous cell in the list
     rcells = [mx.rnn.GRUCell(num_hidden=args.recurrent_state_size)]
     skiprcells = [mx.rnn.LSTMCell(num_hidden=args.recurrent_state_size)]
  
-    # Define network symbol
-    symbol, data_names, label_names = sym_gen(train_iter, args.q, args.filter_list, args.num_filters,
+    symbol, data_names, label_names = net(train_iter, args.q, args.filter_list, args.num_filters,
                                               args.dropout, rcells, skiprcells, args.seasonal_period,
                                               args.time_interval)
  
     Train = False
-    # train cnn model
     if Train:
         module = train(symbol, train_iter, val_iter, data_names, label_names)
  
